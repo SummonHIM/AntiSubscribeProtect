@@ -26,7 +26,7 @@ class AladdinNetwork(XBoard):
         """
         解析 DNS 服务器字符串并用 dnspython 查询域名的 IPv4 地址
         支持缓存，如果缓存命中则直接返回
-        
+
         :param dns_server: DNS 服务器
         :type dns_server: str
         :param query_domain: 域名
@@ -117,7 +117,7 @@ class AladdinNetwork(XBoard):
     def apply_clash_dns(self, yaml_text: str, timeout=3):
         """
         解析 Clash 订阅，按 nameserver-policy 替换 proxies 的 server 为 IP
-        
+
         :param yaml_text: 订阅文本
         :type yaml_text: str
         :param timeout: 超时
@@ -127,7 +127,8 @@ class AladdinNetwork(XBoard):
         if "dns" not in data or "nameserver-policy" not in data["dns"]:
             raise ValueError("YAML does not contain dns.nameserver-policy")
 
-        policy = data["dns"]["nameserver-policy"]  # dict: {'域名通配符': 'dns_server'}
+        # dict: {'域名通配符': 'dns_server'}
+        policy = data["dns"]["nameserver-policy"]
 
         if "proxies" not in data or not isinstance(data["proxies"], list):
             raise ValueError("YAML does not contain proxies list")
@@ -161,9 +162,11 @@ class AladdinNetwork(XBoard):
 
             # 查询 IP
             try:
-                ips = self.resolve_ipv4(matched_dns, server_name, timeout=timeout)
+                ips = self.resolve_ipv4(
+                    matched_dns, server_name, timeout=timeout)
             except ValueError as e:
-                raise ValueError(f"Failed to resolve {server_name} via {matched_dns}: {e}")
+                raise ValueError(
+                    f"Failed to resolve {server_name} via {matched_dns}: {e}")
 
             if not ips:
                 continue  # 没有 IP，也跳过
@@ -225,6 +228,8 @@ class AladdinNetwork(XBoard):
 
         # 将原始响应头全部添加到 Flask 响应中
         for key, value in resp.headers.items():
-            flask_resp.headers[key] = value
+            if key.lower() in self.allowed_headers:
+                flask_resp.headers[key] = value
+        flask_resp.content_type = "application/x-yaml"
 
         return flask_resp

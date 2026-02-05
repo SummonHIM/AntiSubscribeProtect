@@ -15,6 +15,14 @@ class XBoard(BaseBoard):
         "ua": ParamMeta(default="Request UA"),
     }
 
+    allowed_headers = [
+        "content-disposition",
+        "subscription-userinfo",
+        "profile-title",
+        "profile-update-interval",
+        "profile-web-page-url"
+    ]
+
     def login(self, session: requests.Session, host: str, email: str, password: str) -> str:
         """
         登录
@@ -138,6 +146,9 @@ class XBoard(BaseBoard):
 
         # 将原始响应头全部添加到 Flask 响应中
         for key, value in resp.headers.items():
-            flask_resp.headers[key] = value
+            if key.lower() in self.allowed_headers:
+                flask_resp.headers[key] = value
+        flask_resp.content_type = resp.headers.get(
+            "Content-Type", "text/plain; charset=utf-8")
 
         return flask_resp
