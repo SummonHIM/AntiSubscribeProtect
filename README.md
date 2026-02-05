@@ -11,6 +11,13 @@ pip install --requirement requirements.txt
 gunicorn --bind 0.0.0.0:8000 --workers 4 main:app
 ```
 
+### Development & Debug
+
+```
+pip install --requirement requirements.txt
+python main.py
+```
+
 ### Docker
 
 ```
