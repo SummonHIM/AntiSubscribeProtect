@@ -37,7 +37,7 @@ class Netsyo(XBoard):
         except requests.exceptions.HTTPError as e:
             raise APIErrorException(
                 code=500,
-                details=f"Failed to fetch subscription information, server return status code {e.response.status_code}.",
+                details=f"Failed to unlock subscription restrict, server return status code {e.response.status_code}.",
             ) from e
 
         except requests.exceptions.RequestException as e:
@@ -77,7 +77,7 @@ class Netsyo(XBoard):
         if not self.api_unlock_subscribe(session, baseurl, auth_data):
             raise APIErrorException(
                 code=500,
-                details="Failed to unlock subscription content"
+                details="Failed to unlock subscription restrict"
             )
         subscribe_url = self.api_get_subscribe(session, baseurl, auth_data)
 
