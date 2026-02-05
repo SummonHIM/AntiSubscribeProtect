@@ -2,6 +2,8 @@
 
 I believe you can roughly guess the purpose of this program just from the title and tags.
 
+Please do not promote this project on any forums, blogs, video platforms, or similar websites.
+
 ## Running
 
 ```
