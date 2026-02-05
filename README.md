@@ -34,6 +34,7 @@ GET /
 
 200: {
   "boards": [
+    "code": 200,
     "Board/Site ID",
   ]
 }
@@ -46,21 +47,13 @@ GET /board/<Board/Site ID>
 
 200: Subscription content
 
-400: {
-    "error": "Error code",
-    "details": [
-        {
-            "error": "Error code",
-            "message": "Error message",
-            "param": "Problematic parameter"
-        }
-    ],
-    "help": {
+400-599: {
+    "code": 400,
+    "details": "Error message",
+    "help_msg": {
         "description": "Board/Site description",
-        "endpoint": "Endpoint",
         "example": "Usage example",
-        "method": "GET",
-        "name": "Board/Site ID",
+        "id": "Board/Site ID",
         "query_params": {
             "parameter": {
                 "available": ["Available fixed values"],

@@ -1,23 +1,26 @@
-import yaml
 import fnmatch
 import traceback
-import dns.query
-import dns.message
-import dns.rdatatype
+from typing import Dict, Tuple
 from urllib.parse import urlparse
-from flask import request, jsonify, make_response
 
+import dns.message
+import dns.query
+import dns.rdatatype
+import requests
+import yaml
+from requests.structures import CaseInsensitiveDict
+
+from .base import APIErrorException, APIQueryParams
 from .xboard import XBoard
-from .base import ParamMeta
 
 
 class AladdinNetwork(XBoard):
-    name = "aladdinnet"
+    id = "aladdinnet"
     description = "Aladdin Network Clash subscription fetcher with DNS replacement"
     query_params = {
-        "host": ParamMeta(default="https://openapi.kdcloud.uk"),
-        "email": ParamMeta(required=True, example="user@example.com"),
-        "password": ParamMeta(required=True),
+        "baseurl": APIQueryParams(default="https://openapi.kdcloud.uk"),
+        "email": APIQueryParams(required=True, example="user@example.com"),
+        "password": APIQueryParams(required=True),
     }
     ua = "ClashforWindows/0.20.39"
     dns_cache: dict[tuple[str, str], list[str]] = {}
@@ -103,7 +106,8 @@ class AladdinNetwork(XBoard):
 
             if not ips:
                 raise ValueError(
-                    f"No A records found for {query_domain} via {dns_server}")
+                    f"No A records found for {query_domain} via {dns_server}"
+                )
 
             # 缓存结果
             self.dns_cache[cache_key] = ips
@@ -111,10 +115,12 @@ class AladdinNetwork(XBoard):
 
         except Exception as e:
             # 统一用 ValueError 抛出
+            traceback.print_exc()
             raise ValueError(
-                f"DNS query failed for {query_domain} via {dns_server}: {e}")
+                f"DNS query failed for {query_domain} via {dns_server}: {e}"
+            )
 
-    def apply_clash_dns(self, yaml_text: str, timeout=3):
+    def replace_pxydom_ip(self, yaml_text: str, timeout=3):
         """
         解析 Clash 订阅，按 nameserver-policy 替换 proxies 的 server 为 IP
 
@@ -122,16 +128,28 @@ class AladdinNetwork(XBoard):
         :type yaml_text: str
         :param timeout: 超时
         """
-        data = yaml.safe_load(yaml_text)
+        try:
+            data = yaml.safe_load(yaml_text)
+        except Exception as e:
+            raise APIErrorException(
+                code=500,
+                details="Failed to parse YAML subscribe content.",
+            ) from e
 
         if "dns" not in data or "nameserver-policy" not in data["dns"]:
-            raise ValueError("YAML does not contain dns.nameserver-policy")
+            raise APIErrorException(
+                code=500,
+                details="dns.nameserver-policy is missing in YAML configuration.",
+            )
 
         # dict: {'域名通配符': 'dns_server'}
-        policy = data["dns"]["nameserver-policy"]
+        ns_policy = data["dns"]["nameserver-policy"]
 
         if "proxies" not in data or not isinstance(data["proxies"], list):
-            raise ValueError("YAML does not contain proxies list")
+            raise APIErrorException(
+                code=500,
+                details="proxies list is missing or invalid in YAML configuration",
+            )
 
         for proxy in data["proxies"]:
             server_name = proxy.get("server")
@@ -140,7 +158,7 @@ class AladdinNetwork(XBoard):
 
             # 匹配域名通配符
             matched_dns = None
-            for pattern, dns_server in policy.items():
+            for pattern, dns_server in ns_policy.items():
                 # 转换 Clash 通配符到 fnmatch 可以匹配的形式
                 # * -> 只能匹配一级域名 -> *.baidu.com -> ?*.baidu.com?
                 # + -> 匹配多级 -> +.baidu.com -> *baidu.com
@@ -163,10 +181,15 @@ class AladdinNetwork(XBoard):
             # 查询 IP
             try:
                 ips = self.resolve_ipv4(
-                    matched_dns, server_name, timeout=timeout)
+                    matched_dns,
+                    server_name,
+                    timeout=timeout
+                )
             except ValueError as e:
-                raise ValueError(
-                    f"Failed to resolve {server_name} via {matched_dns}: {e}")
+                raise APIErrorException(
+                    code=500,
+                    details=f"Failed to replace the domain with an IP address: {str(e)}",
+                ) from e
 
             if not ips:
                 continue  # 没有 IP，也跳过
@@ -176,60 +199,44 @@ class AladdinNetwork(XBoard):
 
         return data
 
-    def handle(self):
-        # ---------- 1. 校验参数 ----------
-        params, errors = self.validate(request.args)
-        if errors:
-            return jsonify({
-                "error": "invalid_parameters",
-                "details": errors,
-                "help": self.help(),
-            }), 400
-
-        host = params["host"].rstrip("/")
-        email = params["email"]
-        password = params["password"]
-
-        # ---------- 2. 创建 Session ----------
-        import requests
+    def construct_subscribe(self, query_params: Dict[str, str]) -> Tuple[str | bytes, CaseInsensitiveDict[str]]:
+        baseurl = query_params["baseurl"].rstrip("/")
+        email = query_params["email"]
+        password = query_params["password"]
         session = requests.Session()
-        session.headers.update({"User-Agent": self.ua})
+        session.headers.update({
+            "User-Agent": self.ua
+        })
+
+        auth_data = self.api_login(
+            session,
+            baseurl,
+            email,
+            password
+        )
+
+        subscribe_url = self.api_get_subscribe(session, baseurl, auth_data)
 
         try:
-            # ---------- 3. 登录获取 auth_data ----------
-            auth_data = self.login(session, host, email, password)
-            # ---------- 4. 获取订阅 URL ----------
-            subscribe_url = self.get_subscribe(session, host, auth_data)
-            # ---------- 5. 获取订阅内容 ----------
             resp = session.get(subscribe_url, timeout=10)
             resp.raise_for_status()
-        except requests.RequestException as e:
+        except requests.exceptions.HTTPError as e:
+            raise APIErrorException(
+                code=500,
+                details=f"Failed to fetch subscription content, server return status code {e.response.status_code}.",
+            ) from e
+
+        except requests.exceptions.RequestException as e:
             traceback.print_exc()
-            return jsonify({"error": "network_error", "message": str(e)}), 502
-        except ValueError as e:
-            traceback.print_exc()
-            return jsonify({"error": "data_error", "message": str(e)}), 502
-        except Exception as e:
-            traceback.print_exc()
-            return jsonify({"error": "unknown_error", "message": str(e)}), 500
+            raise APIErrorException(
+                code=502,
+                details="Unable to connect to subscription service",
+            ) from e
 
-        # ---------- 6. 解析并替换 proxies ----------
-        try:
-            content = resp.content.decode("utf-8")
-            data = self.apply_clash_dns(content)
-        except Exception as e:
-            traceback.print_exc()
-            return jsonify({"error": "yaml_parse_error", "message": str(e)}), 500
+        replaced_content = yaml.safe_dump(
+            self.replace_pxydom_ip(resp.content.decode()),
+            sort_keys=False,
+            allow_unicode=True
+        )
 
-        # ---------- 7. 返回处理后的 YAML ----------
-        out_yaml = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
-
-        flask_resp = make_response(out_yaml, 200)
-
-        # 将原始响应头全部添加到 Flask 响应中
-        for key, value in resp.headers.items():
-            if key.lower() in self.allowed_headers:
-                flask_resp.headers[key] = value
-        flask_resp.content_type = "application/x-yaml"
-
-        return flask_resp
+        return replaced_content, resp.headers

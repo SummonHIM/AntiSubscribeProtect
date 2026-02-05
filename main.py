@@ -1,40 +1,52 @@
+import traceback
+
 from flask import Flask, jsonify, make_response
 
-from board.base import load_boards
+from board.base import APIErrorException, load_boards
 
-# Flask app
 app = Flask(__name__)
-
-
-BOARD_DIR = "board"
 BOARDS = load_boards()
 
 
-@app.route("/", defaults={"path": ""})
-@app.route("/<path:path>")
+@app.get("/", defaults={"path": ""})
+@app.get("/<path:path>")
 def catch_all(path: str):
+    # 根目录
     if path == "":
-        # 根路径，返回 board 列表
         return jsonify({
+            "code": 200,
             "boards": list(BOARDS.keys())
         })
+
+    # 动态 board 路由
     elif path.startswith("board/"):
-        # 动态 board 路由
         name = path.split("/")[1]
         board = BOARDS.get(name)
         if board is None:
             return jsonify({
-                "error": "board_not_found",
-                "available": list(BOARDS.keys())
+                "code": 404,
+                "details": "Not Found",
+                "boards": list(BOARDS.keys())
             }), 404
 
         # 调用 board.handle()
-        return make_response(board.handle())
+        try:
+            return board.handle()
+        except APIErrorException as e:
+            return jsonify(e.to_dict()), e.code
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({
+                "code": 500,
+                "details": "Internal Server Error",
+            }), 500
+
+    # 404
     else:
-        # 404 fallback
         return jsonify({
-            "error": "not_found",
-            "available_boards": list(BOARDS.keys())
+            "code": 404,
+            "details": "Not Found",
+            "boards": list(BOARDS.keys())
         }), 404
 
 

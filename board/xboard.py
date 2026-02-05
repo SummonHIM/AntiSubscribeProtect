@@ -1,36 +1,35 @@
 import traceback
+from typing import Dict, Tuple
+
 import requests
-from flask import request, jsonify, make_response
-from .base import BaseBoard, ParamMeta
+from flask import request as flask_request
+from requests.structures import CaseInsensitiveDict
+
+from .base import APIErrorException, APIQueryParams, BaseBoard
 
 
 class XBoard(BaseBoard):
-    name = "xboard"
+    id = "xboard"
     description = "Dynamic subscription fetcher for XBoard providers"
-
     query_params = {
-        "host": ParamMeta(required=True, example="https://example.com"),
-        "email": ParamMeta(required=True, example="user@example.com"),
-        "password": ParamMeta(required=True),
-        "ua": ParamMeta(default="Request UA"),
+        "baseurl": APIQueryParams(required=True, example="https://example.com"),
+        "email": APIQueryParams(required=True, example="user@example.com"),
+        "password": APIQueryParams(required=True),
+        "ua": APIQueryParams(default="Request User-Agent"),
     }
 
-    allowed_headers = [
-        "content-disposition",
-        "subscription-userinfo",
-        "profile-title",
-        "profile-update-interval",
-        "profile-web-page-url"
-    ]
+    def custom_vaildate(self, normalized: Dict[str, str]):
+        if (normalized.get("ua") == "Request User-Agent"):
+            normalized["ua"] = flask_request.user_agent.string
 
-    def login(self, session: requests.Session, host: str, email: str, password: str) -> str:
+    def api_login(self, session: requests.Session, baseurl: str, email: str, password: str) -> str:
         """
         登录
 
         :param session: 请求模块的会话
         :type session: requests.Session
-        :param host: 主机
-        :type host: str
+        :param baseurl: 主机
+        :type baseurl: str
         :param email: 邮箱
         :type email: str
         :param password: 密码
@@ -38,117 +37,143 @@ class XBoard(BaseBoard):
         :return: 登录令牌
         :rtype: str
         """
-        url = f"{host}/api/v1/passport/auth/login"
+        url = f"{baseurl}/api/v1/passport/auth/login"
 
-        resp = session.post(
-            url,
-            data={
-                "email": email,
-                "password": password,
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
+        try:
+            resp = session.post(
+                url,
+                data={
+                    "email": email,
+                    "password": password,
+                },
+                timeout=5,
+            )
 
-        data = resp.json().get("data", {})
+            # HTTP status check
+            resp.raise_for_status()
+
+        except requests.exceptions.HTTPError as e:
+            raise APIErrorException(
+                code=500,
+                details=f"Authentication request failed, server return status code {e.response.status_code}.",
+            ) from e
+
+        except requests.exceptions.RequestException as e:
+            # Network / timeout / DNS / connection error
+            traceback.print_exc()
+            raise APIErrorException(
+                code=502,
+                details="Unable to connect to authentication service",
+            ) from e
+
+        try:
+            data = resp.json().get("data", {})
+        except ValueError as e:
+            raise APIErrorException(
+                502,
+                "Invalid JSON response from authentication service",
+            ) from e
+
         auth_data = data.get("auth_data")
 
         if not auth_data:
-            raise ValueError("auth_data not found")
+            raise APIErrorException(
+                500,
+                "Authentication succeeded but token is missing in response",
+            )
 
         return auth_data
 
-    def get_subscribe(self, session: requests.Session, host: str, auth_data: str) -> str:
+    def api_get_subscribe(self, session: requests.Session, baseurl: str, auth_data: str) -> str:
         """
         获取订阅链接
 
         :param session: 请求模块的会话
         :type session: requests.Session
-        :param host: 主机
-        :type host: str
+        :param baseurl: 主机
+        :type baseurl: str
         :param auth_data: 登录令牌
         :type auth_data: str
         :return: 订阅链接
         :rtype: str
         """
-        url = f"{host}/api/v1/user/getSubscribe"
+        url = f"{baseurl}/api/v1/user/getSubscribe"
 
-        resp = session.get(
-            url,
-            headers={
-                "Authorization": auth_data
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
+        try:
+            resp = session.get(
+                url,
+                headers={
+                    "Authorization": auth_data,
+                },
+                timeout=5,
+            )
+            resp.raise_for_status()
 
-        data = resp.json().get("data", {})
+        except requests.exceptions.HTTPError as e:
+            raise APIErrorException(
+                code=500,
+                details=f"Failed to fetch subscription information, server return status code {e.response.status_code}.",
+            ) from e
+
+        except requests.exceptions.RequestException as e:
+            traceback.print_exc()
+            raise APIErrorException(
+                code=502,
+                details="Unable to connect to subscription service",
+            ) from e
+
+        # ---- business logic ----
+
+        try:
+            data = resp.json().get("data", {})
+        except ValueError as e:
+            raise APIErrorException(
+                502,
+                "Invalid JSON response from subscription service",
+            ) from e
+
         subscribe_url = data.get("subscribe_url")
 
         if not subscribe_url:
-            raise ValueError("subscribe_url not found")
+            raise APIErrorException(
+                500,
+                "Subscription URL not found in response",
+            )
 
         return subscribe_url
 
-    def handle(self):
-        # ---------- 1. 校验参数 ----------
-        params, errors = self.validate(request.args)
-
-        if errors:
-            return jsonify({
-                "error": "invalid_parameters",
-                "details": errors,
-                "help": self.help(),
-            }), 400
-
-        # ---------- 2. 准备参数 ----------
-        host = params["host"].rstrip("/")
-        email = params["email"]
-        password = params["password"]
-
-        if (params["ua"] == "Request UA"):
-            ua = request.user_agent.string
-        else:
-            ua = params["ua"]
-
-        # ---------- 3. 创建 Session 并设置 UA ----------
+    def construct_subscribe(self, query_params: Dict[str, str]) -> Tuple[str | bytes, CaseInsensitiveDict[str]]:
+        baseurl = query_params["baseurl"].rstrip("/")
+        email = query_params["email"]
+        password = query_params["password"]
         session = requests.Session()
         session.headers.update({
-            "User-Agent": ua
+            "User-Agent": query_params["ua"]
         })
 
+        auth_data = self.api_login(
+            session,
+            baseurl,
+            email,
+            password
+        )
+
+        subscribe_url = self.api_get_subscribe(session, baseurl, auth_data)
+
         try:
-            # ---------- 4. 登录获取 auth_data ----------
-            auth_data = self.login(session, host, email, password)
-
-            # ---------- 5. 获取订阅 URL ----------
-            subscribe_url = self.get_subscribe(session, host, auth_data)
-
-            # ---------- 6. 获取订阅内容 ----------
             resp = session.get(subscribe_url, timeout=10)
             resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            raise APIErrorException(
+                code=500,
+                details=f"Failed to fetch subscription content, server return status code {e.response.status_code}.",
+            ) from e
 
-        except requests.RequestException as e:
-            # 网络/HTTP 错误
+        except requests.exceptions.RequestException as e:
             traceback.print_exc()
-            return jsonify({"error": "network_error", "message": str(e)}), 502
-        except ValueError as e:
-            # 登录/订阅返回值异常
-            traceback.print_exc()
-            return jsonify({"error": "data_error", "message": str(e)}), 502
-        except Exception as e:
-            # 其他异常兜底
-            traceback.print_exc()
-            return jsonify({"error": "unknown_error", "message": str(e)}), 500
+            raise APIErrorException(
+                code=502,
+                details="Unable to connect to subscription service",
+            ) from e
 
-        # ---------- 7. 返回原始订阅内容 ----------
-        flask_resp = make_response(resp.content, 200)
-
-        # 将原始响应头全部添加到 Flask 响应中
-        for key, value in resp.headers.items():
-            if key.lower() in self.allowed_headers:
-                flask_resp.headers[key] = value
-        flask_resp.content_type = resp.headers.get(
-            "Content-Type", "text/plain; charset=utf-8")
-
-        return flask_resp
+        return resp.content, resp.headers
