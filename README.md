@@ -8,7 +8,14 @@ Please do not promote this project on any forums, blogs, video platforms, or sim
 
 ```
 pip install --requirement requirements.txt
-gunicorn --bind 0.0.0.0:8000 --bind [::]:8000 --workers 4 main:app
+gunicorn --bind 0.0.0.0:8000 --workers 4 main:app
+```
+
+### Docker
+
+```
+docker pull ghcr.io/summonhim/antisubscribeprotect
+docker run -p 8000:8000 ghcr.io/summonhim/antisubscribeprotect
 ```
 
 ## Usage
