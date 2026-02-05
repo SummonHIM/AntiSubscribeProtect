@@ -1,4 +1,4 @@
-# AnitSubscribeProtect
+# AntiSubscribeProtect
 
 I believe you can roughly guess the purpose of this program just from the title and tags.
 
