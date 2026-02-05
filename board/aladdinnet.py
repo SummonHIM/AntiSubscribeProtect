@@ -5,7 +5,7 @@ import dns.query
 import dns.message
 import dns.rdatatype
 from urllib.parse import urlparse
-from flask import request, jsonify
+from flask import request, jsonify, make_response
 
 from .xboard import XBoard
 from .base import ParamMeta
@@ -220,4 +220,11 @@ class AladdinNetwork(XBoard):
 
         # ---------- 7. 返回处理后的 YAML ----------
         out_yaml = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
-        return out_yaml, 200, {"Content-Type": "application/x-yaml"}
+
+        flask_resp = make_response(out_yaml, 200)
+
+        # 将原始响应头全部添加到 Flask 响应中
+        for key, value in resp.headers.items():
+            flask_resp.headers[key] = value
+
+        return flask_resp

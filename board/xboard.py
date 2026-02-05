@@ -1,6 +1,6 @@
 import traceback
 import requests
-from flask import request, jsonify
+from flask import request, jsonify, make_response
 from .base import BaseBoard, ParamMeta
 
 
@@ -18,7 +18,7 @@ class XBoard(BaseBoard):
     def login(self, session: requests.Session, host: str, email: str, password: str) -> str:
         """
         登录
-        
+
         :param session: 请求模块的会话
         :type session: requests.Session
         :param host: 主机
@@ -53,7 +53,7 @@ class XBoard(BaseBoard):
     def get_subscribe(self, session: requests.Session, host: str, auth_data: str) -> str:
         """
         获取订阅链接
-        
+
         :param session: 请求模块的会话
         :type session: requests.Session
         :param host: 主机
@@ -97,7 +97,7 @@ class XBoard(BaseBoard):
         host = params["host"].rstrip("/")
         email = params["email"]
         password = params["password"]
-        
+
         if (params["ua"] == "Request UA"):
             ua = request.user_agent.string
         else:
@@ -134,7 +134,10 @@ class XBoard(BaseBoard):
             return jsonify({"error": "unknown_error", "message": str(e)}), 500
 
         # ---------- 7. 返回原始订阅内容 ----------
-        return resp.content, 200, {
-            "Content-Type": resp.headers.get("Content-Type", "text/plain; charset=utf-8")
-        }
+        flask_resp = make_response(resp.content, 200)
 
+        # 将原始响应头全部添加到 Flask 响应中
+        for key, value in resp.headers.items():
+            flask_resp.headers[key] = value
+
+        return flask_resp
