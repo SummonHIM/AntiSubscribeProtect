@@ -18,7 +18,19 @@ class Netsyo(XBoard):
         "ua": APIQueryParams(default="Request User-Agent"),
     }
 
-    def api_unlock_subscribe(self, session: requests.Session, baseurl: str, auth_data: str):
+    def api_unlock_subscribe(self, session: requests.Session, baseurl: str, auth_data: str) -> bool:
+        """
+        解锁订阅限制（三分钟）
+        
+        :param session: 请求模块的会话
+        :type session: requests.Session
+        :param baseurl: 主机
+        :type baseurl: str
+        :param auth_data: 登录令牌
+        :type auth_data: str
+        :return: 是否成功
+        :rtype: bool
+        """
         url = f"{baseurl}/api/v1/user/bootstrap"
 
         try:

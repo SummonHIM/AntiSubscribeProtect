@@ -33,10 +33,10 @@ docker run -p 8000:8000 ghcr.io/summonhim/antisubscribeprotect
 GET /
 
 200: {
-  "boards": [
     "code": 200,
-    "Board/Site ID",
-  ]
+    "boards": [
+        "Board/Site ID",
+    ]
 }
 ```
 
