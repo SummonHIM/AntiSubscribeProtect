@@ -16,6 +16,7 @@ class XBoard(BaseBoard):
         "email": APIQueryParams(required=True, example="user@example.com"),
         "password": APIQueryParams(required=True),
         "ua": APIQueryParams(default="Request User-Agent"),
+        "ssl_verify": APIQueryParams(default="false")
     }
 
     def custom_vaildate(self, normalized: Dict[str, str]):
@@ -146,10 +147,13 @@ class XBoard(BaseBoard):
         baseurl = query_params["baseurl"].rstrip("/")
         email = query_params["email"]
         password = query_params["password"]
+        ssl_verify = query_params["ssl_verify"] == "true" or query_params["ssl_verify"] == "1"
+        
         session = requests.Session()
         session.headers.update({
             "User-Agent": query_params["ua"]
         })
+        session.verify = ssl_verify
 
         auth_data = self.api_login(
             session,
